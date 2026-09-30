@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mis horas extras</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--tx:#1b1f24;--mut:#6b7280;--ac:#2563eb;--ok:#16a34a;--bd:#e5e7eb;--we:#fef3c7;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1216;--card:#1a1f26;--tx:#e8eaed;--mut:#9aa3af;--ac:#60a5fa;--ok:#4ade80;--bd:#2a313a;--we:#3a3220}}
+:root[data-theme="dark"]{--bg:#0f1216;--card:#1a1f26;--tx:#e8eaed;--mut:#9aa3af;--ac:#60a5fa;--ok:#4ade80;--bd:#2a313a;--we:#3a3220}
+*{box-sizing:border-box}
+body{margin:0 auto;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;max-width:520px;padding:12px}
+.card{background:var(--card);border-radius:14px;padding:14px;margin-bottom:12px;border:1px solid var(--bd)}
+.nav{display:flex;align-items:center;justify-content:space-between}
+.nav button{background:var(--card);color:var(--tx);border:1px solid var(--bd);border-radius:10px;width:44px;height:44px;font-size:20px}
+.nav h1{font-size:17px;margin:0;text-align:center}
+.nav small{display:block;color:var(--mut);font-weight:400;font-size:13px}
+.big{display:flex;gap:10px}
+.big div{flex:1;text-align:center}
+.big b{display:block;font-size:22px;color:var(--ok)}
+.big span{font-size:12px;color:var(--mut)}
+.sub{text-align:center;font-size:12px;color:var(--mut);margin-top:10px}
+.set{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.set label,.day label{font-size:12px;color:var(--mut);display:block}
+input{width:100%;padding:10px;font-size:16px;border:1px solid var(--bd);border-radius:10px;background:var(--bg);color:var(--tx)}
+.day{padding:8px 6px;border-bottom:1px solid var(--bd)}
+.day:last-child{border:0}
+.day.we{background:var(--we);border-radius:8px}
+.top{display:flex;justify-content:space-between;font-size:14px;margin-bottom:4px}
+.top small{color:var(--mut)}
+.ex{font-size:13px;color:var(--mut);text-align:right}
+.ex.on{color:var(--ok);font-weight:700}
+.io{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+h2{font-size:14px;margin:0 0 10px}
+</style>
+</head>
+<body>
+<div class="card nav">
+  <button id="prev" aria-label="Anterior">‹</button>
+  <h1 id="title"></h1>
+  <button id="next" aria-label="Siguiente">›</button>
+</div>
+
+<div class="sub" id="sync" style="margin:-4px 0 10px"></div>
+<div class="card">
+  <div class="big">
+    <div><b id="tot"></b><span>Horas extras</span></div>
+    <div><b id="money"></b><span>Extras a cobrar (estimado)</span></div>
+  </div>
+  <div class="sub" id="split"></div>
+</div>
+
+<div class="card">
+  <h2>Ajustes</h2>
+  <div class="set">
+    <div><label>Valor hora normal ($)</label><input id="rate" type="number" inputmode="decimal" min="0"></div>
+    <div><label>Jornada (hh:mm)</label><input id="base" type="time"></div>
+    <div><label>Recargo extra (%)</label><input id="p50" type="number" inputmode="decimal" min="0"></div>
+    <div><label>Recargo 100% (%)</label><input id="p100" type="number" inputmode="decimal" min="0"></div>
+    <div style="grid-column:span 2"><label>Sábado: hasta esta hora cobra el recargo normal, después el 100%</label><input id="cut" type="time"></div>
+  </div>
+</div>
+
+<div class="card"><h2>Entrada y salida por día</h2><div id="days"></div></div>
+
+<script>
+const K='horasExtras.v2';
+let S={base:528,rate:0,p50:50,p100:100,cut:780,data:{}};
+try{const r=localStorage.getItem(K);if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+const local=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+let ref=null,tm=null;
+const setSync=m=>{const e=document.getElementById('sync');if(e)e.textContent=m};
+const clone=o=>JSON.parse(JSON.stringify(o));
+const save=()=>{local();if(!ref)return;setSync('☁️ Guardando…');clearTimeout(tm);tm=setTimeout(async()=>{tm=null;try{await ref.set(clone(S));setSync('☁️ Guardado en la nube')}catch(e){setSync('⚠️ No se pudo guardar en la nube (quedó en este dispositivo)')}},600)};
+async function pull(first){
+  const s=await ref.get();
+  if(s.exists){S=Object.assign(S,clone(s.data()));applyInputs();render();local()}
+  else if(first){await ref.set(clone(S))}
+  setSync('☁️ Sincronizado con la nube');
+}
+async function initCloud(){
+  try{
+    if(!window.claude){setSync('Guardado solo en este dispositivo');return}
+    const db=await claude.use('db');
+    if(!db){setSync('Guardado solo en este dispositivo');return}
+    ref=db.doc('horas/estado');
+    await pull(true);
+    document.addEventListener('visibilitychange',()=>{if(!document.hidden&&!tm)pull(false).catch(()=>{})});
+  }catch(e){ref=null;setSync('Guardado solo en este dispositivo')}
+}
+const $=id=>document.getElementById(id);
+const t=new Date();
+let Y=t.getFullYear(),M=t.getMonth(),H=t.getDate()<=15?1:2;
+const MN=['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const DN=['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+const p2=n=>String(n).padStart(2,'0');
+const toHM=m=>p2(Math.floor(m/60))+':'+p2(m%60);
+const fmt=m=>Math.floor(m/60)+' h '+p2(m%60)+' min';
+const money=n=>'$ '+n.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2});
+const parse=v=>{if(!v)return null;const[a,b]=v.split(':').map(Number);return a*60+b};
+
+function render(){
+  const last=new Date(Y,M+1,0).getDate();
+  const from=H===1?1:16,to=H===1?15:last;
+  $('title').innerHTML=(H===1?'1ª':'2ª')+' quincena · '+MN[M]+' '+Y+'<small>Del '+from+' al '+to+'</small>';
+  let html='';
+  for(let d=from;d<=to;d++){
+    const key=Y+'-'+p2(M+1)+'-'+p2(d),dow=new Date(Y,M,d).getDay(),we=dow===0||dow===6;
+    const e=S.data[key]||{};
+    html+='<div class="day'+(we?' we':'')+'" data-k="'+key+'" data-dow="'+dow+'"><div class="top"><span>'+DN[dow]+' '+d+(we?'':'')+'</span><span class="ex"></span></div>'
+      +'<div class="io"><div><label>Entrada</label><input data-f="in" type="time" value="'+(e.in!=null?toHM(e.in):'')+'"></div>'
+      +'<div><label>Salida</label><input data-f="out" type="time" value="'+(e.out!=null?toHM(e.out):'')+'"></div></div></div>';
+  }
+  $('days').innerHTML=html;
+  $('days').querySelectorAll('input').forEach(i=>i.addEventListener('change',ev=>{
+    const row=ev.target.closest('.day'),k=row.dataset.k;
+    const v=parse(ev.target.value),f=ev.target.dataset.f;
+    S.data[k]=S.data[k]||{};
+    if(v==null)delete S.data[k][f];else S.data[k][f]=v;
+    if(S.data[k].in==null&&S.data[k].out==null)delete S.data[k];
+    save();calc();
+  }));
+  calc();
+}
+
+// returns minutes at extra rate (m50) and at 100% (m100)
+function split(dow,e){
+  if(!e||e.in==null||e.out==null)return[0,0,0];
+  const s=e.in;let f=e.out;if(f<=s)f+=1440;
+  const w=f-s;
+  if(dow===0)return[0,w,w];
+  if(dow===6){const a=Math.max(0,Math.min(f,S.cut)-s);return[a,w-a,w]}
+  return[Math.max(0,w-S.base),0,w];
+}
+
+function calc(){
+  let a=0,b=0,val=0;
+  $('days').querySelectorAll('.day').forEach(r=>{
+    const [m50,m100,w]=split(+r.dataset.dow,S.data[r.dataset.k]);
+    a+=m50;b+=m100;
+    val+=m50/60*S.rate*(1+S.p50/100)+m100/60*S.rate*(1+S.p100/100);
+    const el=r.querySelector('.ex'),ex=m50+m100;
+    el.textContent=w?('Trabajó '+toHM(w)+(ex?' · extras '+toHM(ex):'')):'';
+    el.className='ex'+(ex?' on':'');
+  });
+  $('tot').textContent=fmt(a+b);
+  $('money').textContent=money(val);
+  $('split').textContent='Al '+(50+0===S.p50?'':'')+S.p50+'%: '+fmt(a)+'  ·  Al '+S.p100+'%: '+fmt(b);
+}
+
+function shift(n){
+  if(H===1&&n>0)H=2;else if(H===2&&n<0)H=1;
+  else if(n>0){H=1;M++;if(M>11){M=0;Y++}}
+  else{H=2;M--;if(M<0){M=11;Y--}}
+  render();
+}
+$('prev').onclick=()=>shift(-1);
+$('next').onclick=()=>shift(1);
+
+function applyInputs(){$('rate').value=S.rate;$('p50').value=S.p50;$('p100').value=S.p100;
+$('base').value=toHM(S.base);$('cut').value=toHM(S.cut)}
+applyInputs();
+[['rate','rate'],['p50','p50'],['p100','p100']].forEach(([id,k])=>$(id).addEventListener('input',e=>{S[k]=parseFloat(e.target.value)||0;save();calc()}));
+$('base').addEventListener('change',e=>{S.base=parse(e.target.value)||528;save();calc()});
+$('cut').addEventListener('change',e=>{S.cut=parse(e.target.value)||780;save();calc()});
+render();
+initCloud();
+</script>
+</body>
+</html>
